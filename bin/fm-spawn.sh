@@ -140,8 +140,12 @@
 #   refuses the spawn rather than risking a PR based on stale history. A project
 #   with NO origin remote configured (a `local-only` posture may have none) has
 #   no upstream to fetch, so it reports a skip and resets to the tip of its LOCAL
-#   default branch instead of refusing. The clean-worktree refusal runs first on
-#   both paths, so neither ever discards uncommitted work; an unresolvable local
+#   default branch instead of refusing. Without origin/HEAD only `main` and
+#   `master` are recognised as that local default, so a no-remote project on any
+#   other default branch is refused here on purpose - it could not land through
+#   fm-merge-local.sh or be torn down either, and a clean refusal at spawn beats
+#   work that cannot be delivered. The clean-worktree refusal runs first on both
+#   paths, so neither ever discards uncommitted work; an unresolvable local
 #   default branch or an unverified reset still refuses.
 # Batch dispatch: pass one or more `id=repo` pairs instead of a single <id> <project>, e.g.
 #     fm-spawn.sh fix-a-k3=projects/foo add-b-q7=projects/bar [--scout]
@@ -1739,10 +1743,16 @@ validate_spawn_worktree() {  # <source> <inspect-target>
 # commit it was allocated at. Resetting here is what makes the reported base
 # true, and it is safe only because the caller has already refused a worktree
 # holding uncommitted work.
+# With no origin/HEAD to read, default_branch recognises only `main` and
+# `master`, so a no-remote project on any other default branch is refused rather
+# than launched. Do not widen that list here alone: bin/fm-merge-local.sh and
+# bin/fm-teardown.sh each carry their own copy of the same resolver, so such a
+# project would start work it then could not land or clean up. Widening it means
+# widening all three together.
 freshen_spawn_worktree_local_base() {  # <worktree>
   local worktree=$1 default expected actual
   default=$(default_branch "$worktree") || {
-    echo "error: could not determine the local default branch for pooled worktree '$worktree'; refusing to launch from a potentially stale base" >&2
+    echo "error: worktree '$worktree' has no origin remote and no local default branch this spawn can resolve; without an origin only 'main' or 'master' is recognised, so rename the project's default branch to one of those or configure an origin remote" >&2
     return 1
   }
   expected=$(git -C "$worktree" rev-parse --verify --quiet "refs/heads/$default^{commit}" 2>/dev/null) || {

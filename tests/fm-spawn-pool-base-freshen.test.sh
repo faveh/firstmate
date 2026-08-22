@@ -216,6 +216,40 @@ test_no_remote_resets_to_local_default_tip() {
   pass "a stale pooled worktree with no origin remote resets to the local default-branch tip"
 }
 
+# Without an origin there is no origin/HEAD to read, so only `main` and `master`
+# are recognised as a local default branch. Refusing here is deliberate: the same
+# resolver is duplicated in fm-merge-local.sh and fm-teardown.sh, so such a
+# project could start work it could never land. The refusal has to say that.
+test_no_remote_unresolvable_default_refuses_with_remedy() {
+  local rec id out status before
+  id='pool-no-remote-develop-r9'
+  rec=$(make_case no-remote-develop "$id" develop none)
+  read_case_record "$rec"
+  before=$(git -C "$POOL_DIR" rev-parse HEAD)
+
+  out=$(run_spawn "$id" --mode local-only --yolo off)
+  status=$?
+  [ "$status" -ne 0 ] \
+    || fail "spawn launched a no-remote project whose default branch it cannot resolve"
+  assert_contains "$out" "no origin remote" \
+    "the refusal did not name the missing origin remote as the cause"
+  assert_contains "$out" "'main' or 'master'" \
+    "the refusal did not say which default branch names are recognised"
+  assert_contains "$out" "configure an origin remote" \
+    "the refusal did not offer the operator a remedy"
+  [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$before" ] \
+    || fail "spawn moved HEAD while refusing an unresolvable local default branch"
+  [ -z "$(git -C "$POOL_DIR" status --porcelain)" ] \
+    || fail "spawn left the pooled worktree dirty while refusing it"
+  assert_grep 'base' "$POOL_DIR/README.md" \
+    "spawn discarded the pooled worktree's content while refusing it"
+  if [ "${FM_TEST_EVIDENCE:-0}" = 1 ]; then
+    printf '# observed unresolvable no-remote default refusal: %s\n' \
+      "$(printf '%s\n' "$out" | grep -F 'no origin remote' | tail -n 1)"
+  fi
+  pass "a no-remote project on an unrecognised default branch is refused with an actionable reason"
+}
+
 test_dirty_no_remote_pool_refuses_without_discarding_work() {
   local rec id out status before
   id='pool-no-remote-dirty-r8'
@@ -341,5 +375,6 @@ test_unreachable_origin_refuses_stale_pool_base
 test_missing_origin_remote_launches_from_local_base
 test_no_remote_resets_to_local_default_tip
 test_dirty_no_remote_pool_refuses_without_discarding_work
+test_no_remote_unresolvable_default_refuses_with_remedy
 
 echo "# all fm-spawn-pool-base-freshen tests passed"
