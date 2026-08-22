@@ -7,8 +7,9 @@
 # starts the worker from the fetched origin/main tip or stops when origin is
 # unreachable. They also pin the carve-out that keeps the two apart: a project
 # with no origin remote configured has no upstream to be stale against, so it
-# reports a skip and launches, while a configured-but-unreachable origin still
-# refuses.
+# reports a skip and follows its local default branch instead, while a
+# configured-but-unreachable origin still refuses. The clean-worktree refusal is
+# pinned on both shapes, because it precedes the choice of base.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -41,6 +42,9 @@ SH
 # bare origin and advances it past the pool base, `none` leaves the project with no
 # remote at all - the shape a `local-only` project is documented as being allowed to
 # have (bin/fm-project-mode.sh), and the one that used to be undispatchable.
+# Both shapes advance the base the spawn is meant to follow past the commit the
+# pooled worktree was detached at, so a worktree left where it was allocated is a
+# visible failure rather than an accidental pass.
 make_case() {
   local name=$1 id=$2 default=${3:-main} remote_mode=${4:-origin} case_dir home project origin pool publisher fakebin initial
   case_dir="$TMP_ROOT/$name"
@@ -63,6 +67,9 @@ make_case() {
   initial=$(git -C "$project" rev-parse HEAD)
   if [ "$remote_mode" = none ]; then
     git -C "$project" worktree add --quiet --detach "$pool" "$initial"
+    printf 'must survive a newly spawned branch\n' > "$project/advanced-main.txt"
+    git -C "$project" add advanced-main.txt
+    git -C "$project" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm advance-local
     printf '%s\n' "$case_dir|$home|$project|$pool|$fakebin|$initial|$default"
     return 0
   fi
@@ -151,7 +158,7 @@ test_non_main_default_branch_refreshes_before_branching() {
 }
 
 test_missing_origin_remote_launches_from_local_base() {
-  local rec id out status head
+  local rec id out status head local_tip
   id='pool-no-remote-r6'
   rec=$(make_case no-remote "$id" main none)
   read_case_record "$rec"
@@ -163,15 +170,76 @@ test_missing_origin_remote_launches_from_local_base() {
   expect_code 0 "$status" "spawn should launch a project that has no origin remote"
   assert_contains "$out" "spawned $id" "spawn did not report success without an origin remote"
   assert_contains "$out" "no origin remote" \
-    "spawn skipped the base refresh without saying so"
+    "spawn skipped the origin fetch without saying so"
   head=$(git -C "$POOL_DIR" rev-parse HEAD)
-  [ "$head" = "$INITIAL_SHA" ] \
-    || fail "spawn moved the worktree off its local base though there is no upstream to follow"
+  local_tip=$(git -C "$POOL_DIR" rev-parse "refs/heads/$DEFAULT_BRANCH")
+  [ "$head" = "$local_tip" ] \
+    || fail "spawn did not start the worker at the local $DEFAULT_BRANCH tip"
   if [ "${FM_TEST_EVIDENCE:-0}" = 1 ]; then
     printf '# observed no-remote skip: %s\n' \
       "$(printf '%s\n' "$out" | grep -F 'no origin remote' | tail -n 1)"
   fi
   pass "a project with no origin remote launches from its local default-branch base"
+}
+
+# A sibling local task merging through fm-merge-local.sh advances the local
+# default branch while a pooled worktree stays detached where it was allocated.
+# Branching from that stale commit is what later makes the merge refuse as a
+# non-fast-forward, so the no-remote spawn has to follow the local tip.
+test_no_remote_resets_to_local_default_tip() {
+  local rec id out status head local_tip
+  id='pool-no-remote-stale-r7'
+  rec=$(make_case no-remote-stale "$id" main none)
+  read_case_record "$rec"
+  local_tip=$(git -C "$POOL_DIR" rev-parse "refs/heads/$DEFAULT_BRANCH")
+  [ "$local_tip" != "$INITIAL_SHA" ] \
+    || fail "fixture did not advance the local default branch past the pool base"
+  [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$INITIAL_SHA" ] \
+    || fail "fixture did not leave the pooled worktree detached at the stale pool base"
+
+  out=$(run_spawn "$id" --mode local-only --yolo off)
+  status=$?
+  expect_code 0 "$status" "spawn should refresh a stale pooled worktree with no origin remote"
+  head=$(git -C "$POOL_DIR" rev-parse HEAD)
+  [ "$head" = "$local_tip" ] \
+    || fail "spawn left the pooled worktree on history the local $DEFAULT_BRANCH has moved past"
+  assert_grep 'must survive a newly spawned branch' "$POOL_DIR/advanced-main.txt" \
+    "spawn did not materialise the advanced local default-branch content"
+
+  git -C "$POOL_DIR" checkout --quiet -b "fm/$id"
+  git -C "$POOL_DIR" merge-base --is-ancestor "refs/heads/$DEFAULT_BRANCH" HEAD \
+    || fail "a branch created after spawn is not a fast-forward of the local $DEFAULT_BRANCH"
+  if [ "${FM_TEST_EVIDENCE:-0}" = 1 ]; then
+    printf '# observed no-remote refresh: pool-base=%s local-tip=%s head=%s\n' \
+      "$INITIAL_SHA" "$local_tip" "$head"
+  fi
+  pass "a stale pooled worktree with no origin remote resets to the local default-branch tip"
+}
+
+test_dirty_no_remote_pool_refuses_without_discarding_work() {
+  local rec id out status before
+  id='pool-no-remote-dirty-r8'
+  rec=$(make_case no-remote-dirty "$id" main none)
+  read_case_record "$rec"
+  git -C "$POOL_DIR" remote get-url origin >/dev/null 2>&1 \
+    && fail "fixture did not prove the project has no origin remote"
+  before=$(git -C "$POOL_DIR" rev-parse HEAD)
+  printf 'keep this local work\n' > "$POOL_DIR/uncommitted.txt"
+
+  out=$(run_spawn "$id" --mode local-only --yolo off)
+  status=$?
+  [ "$status" -ne 0 ] || fail "spawn succeeded despite a dirty pooled worktree with no origin remote"
+  assert_contains "$out" "is not clean" \
+    "spawn did not clearly refuse a dirty pooled worktree without an origin remote"
+  [ "$(git -C "$POOL_DIR" rev-parse HEAD)" = "$before" ] \
+    || fail "spawn moved HEAD while refusing a dirty no-remote pooled worktree"
+  assert_grep 'keep this local work' "$POOL_DIR/uncommitted.txt" \
+    "spawn discarded uncommitted work while refusing a no-remote pool"
+  if [ "${FM_TEST_EVIDENCE:-0}" = 1 ]; then
+    printf '# observed no-remote dirty refusal: %s; preserved=%s\n' \
+      "$(printf '%s\n' "$out" | tail -n 1)" "$(cat "$POOL_DIR/uncommitted.txt")"
+  fi
+  pass "a dirty pooled worktree with no origin remote is refused without discarding its local work"
 }
 
 test_unreachable_origin_refuses_stale_pool_base() {
@@ -271,5 +339,7 @@ test_dirty_pool_refuses_without_discarding_work
 test_unresolved_remote_default_refuses_pool
 test_unreachable_origin_refuses_stale_pool_base
 test_missing_origin_remote_launches_from_local_base
+test_no_remote_resets_to_local_default_tip
+test_dirty_no_remote_pool_refuses_without_discarding_work
 
 echo "# all fm-spawn-pool-base-freshen tests passed"
