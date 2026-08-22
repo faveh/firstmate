@@ -137,7 +137,10 @@
 #   Before a fresh ship or scout worker starts, its clean task worktree fetches
 #   origin, resolves the current remote default branch, and resets to its tip.
 #   An unreachable origin, unresolved default branch, or non-clean worktree
-#   refuses the spawn rather than risking a PR based on stale history.
+#   refuses the spawn rather than risking a PR based on stale history. A project
+#   with NO origin remote configured (a `local-only` posture may have none) has
+#   no upstream that could have advanced, so it reports a skip and launches from
+#   its local default-branch base instead of refusing.
 # Batch dispatch: pass one or more `id=repo` pairs instead of a single <id> <project>, e.g.
 #     fm-spawn.sh fix-a-k3=projects/foo add-b-q7=projects/bar [--scout]
 #   Each pair re-execs this script in single-task mode, so the single path stays the only
@@ -1729,6 +1732,19 @@ validate_spawn_worktree() {  # <source> <inspect-target>
 
 freshen_spawn_worktree_base() {  # <worktree>
   local worktree=$1 default target expected actual status
+  # A repository with no origin remote has no upstream that could have advanced
+  # past this worktree, so the local default-branch commit it was created from
+  # already IS the current base and there is nothing stale to protect against.
+  # `local-only` projects are documented as possibly having no remote at all
+  # (bin/fm-project-mode.sh), so refusing here would make that whole posture
+  # undispatchable. The test is the CONFIGURED remote, not the fetch result:
+  # when an origin exists but cannot be reached (offline, auth, deleted
+  # upstream) the stale-base risk is real and the fetch below still refuses.
+  # Mirrors ff_target's "skipped: no origin remote" (bin/fm-ff-lib.sh).
+  if ! git -C "$worktree" remote get-url origin >/dev/null 2>&1; then
+    echo "skipped: no origin remote for worktree '$worktree'; launching from its local default-branch base"
+    return 0
+  fi
   if ! git -C "$worktree" fetch --quiet origin; then
     echo "error: could not fetch origin for pooled worktree '$worktree'; refusing to launch from a potentially stale base" >&2
     return 1

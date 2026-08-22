@@ -5,7 +5,10 @@
 # advanced after the worktree was allocated.
 # These tests drive the real spawn path with a fake terminal, then prove it
 # starts the worker from the fetched origin/main tip or stops when origin is
-# unreachable.
+# unreachable. They also pin the carve-out that keeps the two apart: a project
+# with no origin remote configured has no upstream to be stale against, so it
+# reports a skip and launches, while a configured-but-unreachable origin still
+# refuses.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -34,8 +37,12 @@ SH
   printf '%s\n' "$fakebin"
 }
 
+# remote_mode selects the fixture's upstream shape: `origin` (the default) wires a
+# bare origin and advances it past the pool base, `none` leaves the project with no
+# remote at all - the shape a `local-only` project is documented as being allowed to
+# have (bin/fm-project-mode.sh), and the one that used to be undispatchable.
 make_case() {
-  local name=$1 id=$2 default=${3:-main} case_dir home project origin pool publisher fakebin initial
+  local name=$1 id=$2 default=${3:-main} remote_mode=${4:-origin} case_dir home project origin pool publisher fakebin initial
   case_dir="$TMP_ROOT/$name"
   home="$case_dir/home"
   project="$case_dir/project"
@@ -53,9 +60,15 @@ make_case() {
   printf 'base\n' > "$project/README.md"
   git -C "$project" add README.md
   git -C "$project" -c user.name='Firstmate Tests' -c user.email='tests@example.invalid' commit -qm initial
+  initial=$(git -C "$project" rev-parse HEAD)
+  if [ "$remote_mode" = none ]; then
+    git -C "$project" worktree add --quiet --detach "$pool" "$initial"
+    printf '%s\n' "$case_dir|$home|$project|$pool|$fakebin|$initial|$default"
+    return 0
+  fi
+
   git clone --quiet --bare "$project" "$origin"
   git -C "$project" remote add origin "file://$origin"
-  initial=$(git -C "$project" rev-parse HEAD)
   git -C "$project" worktree add --quiet --detach "$pool" "$initial"
 
   git clone --quiet "file://$origin" "$publisher"
@@ -135,6 +148,30 @@ test_non_main_default_branch_refreshes_before_branching() {
   [ "$branch_head" = "$current" ] || fail "spawn did not refresh to current origin/$DEFAULT_BRANCH"
   [ "$branch_head" != "$INITIAL_SHA" ] || fail "fixture did not prove origin/$DEFAULT_BRANCH advanced past the pool base"
   pass "a stale pooled worktree resolves and refreshes a non-main default branch"
+}
+
+test_missing_origin_remote_launches_from_local_base() {
+  local rec id out status head
+  id='pool-no-remote-r6'
+  rec=$(make_case no-remote "$id" main none)
+  read_case_record "$rec"
+  git -C "$POOL_DIR" remote get-url origin >/dev/null 2>&1 \
+    && fail "fixture did not prove the project has no origin remote"
+
+  out=$(run_spawn "$id" --mode local-only --yolo off)
+  status=$?
+  expect_code 0 "$status" "spawn should launch a project that has no origin remote"
+  assert_contains "$out" "spawned $id" "spawn did not report success without an origin remote"
+  assert_contains "$out" "no origin remote" \
+    "spawn skipped the base refresh without saying so"
+  head=$(git -C "$POOL_DIR" rev-parse HEAD)
+  [ "$head" = "$INITIAL_SHA" ] \
+    || fail "spawn moved the worktree off its local base though there is no upstream to follow"
+  if [ "${FM_TEST_EVIDENCE:-0}" = 1 ]; then
+    printf '# observed no-remote skip: %s\n' \
+      "$(printf '%s\n' "$out" | grep -F 'no origin remote' | tail -n 1)"
+  fi
+  pass "a project with no origin remote launches from its local default-branch base"
 }
 
 test_unreachable_origin_refuses_stale_pool_base() {
@@ -233,5 +270,6 @@ test_direct_pr_and_scout_refresh_before_launch
 test_dirty_pool_refuses_without_discarding_work
 test_unresolved_remote_default_refuses_pool
 test_unreachable_origin_refuses_stale_pool_base
+test_missing_origin_remote_launches_from_local_base
 
 echo "# all fm-spawn-pool-base-freshen tests passed"
