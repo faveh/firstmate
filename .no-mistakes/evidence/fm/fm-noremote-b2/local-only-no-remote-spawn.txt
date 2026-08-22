@@ -1,0 +1,36 @@
+Manual end-to-end check - firstmate dispatching a worker to a local-only
+project with one commit and NO origin remote (the reported defect).
+
+================ BEFORE the fix (bin/fm-spawn.sh @ 1231b6a) ================
+$ git -C localonly remote -v          # empty: the project has no remote at all
+$ git -C localonly log --oneline
+8218393 initial commit
+
+$ fm-spawn.sh fix-localonly-a1 projects/localonly --mode local-only --yolo off
+warning: /tmp/fm-noremote-manual.Jp2Dtw/home/data/fix-localonly-a1/brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: fix-localonly-a1 ships mode=local-only while the standing posture for localonly is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+fatal: 'origin' does not appear to be a git repository
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+error: could not fetch origin for pooled worktree '/tmp/fm-noremote-manual.Jp2Dtw/pool'; refusing to launch from a potentially stale base
+exit status: 1
+
+$ git -C <worker worktree> log --oneline -1
+8218393 initial commit
+
+================ AFTER the fix (bin/fm-spawn.sh @ d56d3a8) =================
+$ git -C localonly remote -v          # empty: the project has no remote at all
+$ git -C localonly log --oneline
+9590d5d initial commit
+
+$ fm-spawn.sh fix-localonly-b2 projects/localonly --mode local-only --yolo off
+warning: /tmp/fm-noremote-manual.mF2HTJ/home/data/fix-localonly-b2/brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode local-only - confirm its definition of done matches
+notice: fix-localonly-b2 ships mode=local-only while the standing posture for localonly is no-mistakes - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state
+skipped: no origin remote for worktree '/tmp/fm-noremote-manual.mF2HTJ/pool'; launched from its local default-branch base 'main' (9590d5d13cf2fcc9cefae777ebdbb7186aec484d)
+spawned fix-localonly-b2 harness=codex kind=ship mode=local-only yolo=off window=firstmate:fm-fix-localonly-b2 worktree=/tmp/fm-noremote-manual.mF2HTJ/pool
+exit status: 0
+
+$ git -C <worker worktree> log --oneline -1
+9590d5d initial commit

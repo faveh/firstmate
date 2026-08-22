@@ -1,0 +1,22 @@
+# observed spawn: spawned pool-current-base-r1 harness=codex kind=ship mode=no-mistakes yolo=off window=firstmate:fm-pool-current-base-r1 worktree=/var/folders/4r/n8883qfn7r153tx77nv2fsbm0000gn/T//fm-spawn-pool-base-freshen.pXx3gI/current-base/pool
+# observed base: HEAD=432e9076adc15d686aeb2b124fd01402f3727275 origin/main=432e9076adc15d686aeb2b124fd01402f3727275 advanced-main=must survive a newly spawned branch
+ok - a stale pooled worktree refreshes to current origin/main before a crew branch is created
+ok - a stale pooled worktree resolves and refreshes a non-main default branch
+# observed direct-pr spawn: spawned pool-direct-pr-r3 harness=codex kind=ship mode=direct-PR yolo=off window=firstmate:fm-pool-direct-pr-r3 worktree=/var/folders/4r/n8883qfn7r153tx77nv2fsbm0000gn/T//fm-spawn-pool-base-freshen.pXx3gI/direct-pr/pool
+# observed scout spawn: spawned pool-scout-r3 harness=codex kind=scout window=firstmate:fm-pool-scout-r3 worktree=/var/folders/4r/n8883qfn7r153tx77nv2fsbm0000gn/T//fm-spawn-pool-base-freshen.pXx3gI/scout/pool
+ok - direct-PR ships and scouts both refresh stale pooled worktrees before launch
+# observed dirty refusal: error: pooled worktree '/var/folders/4r/n8883qfn7r153tx77nv2fsbm0000gn/T//fm-spawn-pool-base-freshen.pXx3gI/dirty-refusal/pool' is not clean; refusing to discard uncommitted work while refreshing its base; preserved=keep this local work
+ok - a dirty pooled worktree is refused without discarding its local work
+# observed unresolved-default refusal: error: could not resolve origin's current default branch for pooled worktree '/var/folders/4r/n8883qfn7r153tx77nv2fsbm0000gn/T//fm-spawn-pool-base-freshen.pXx3gI/unresolved-default/pool'; refusing to launch from a potentially stale base
+ok - an unresolved remote default branch refuses the pooled worktree
+# observed unreachable-origin refusal: error: could not fetch origin for pooled worktree '/var/folders/4r/n8883qfn7r153tx77nv2fsbm0000gn/T//fm-spawn-pool-base-freshen.pXx3gI/unreachable-origin/pool'; refusing to launch from a potentially stale base
+ok - an unreachable origin refuses a potentially stale pooled worktree
+# observed no-remote skip: skipped: no origin remote for worktree '/var/folders/4r/n8883qfn7r153tx77nv2fsbm0000gn/T//fm-spawn-pool-base-freshen.pXx3gI/no-remote/pool'; launched from its local default-branch base 'main' (4f18b292c7e2fcdb0e2490989a7b439ac9c4b463)
+ok - a project with no origin remote launches from its local default-branch base
+# observed no-remote refresh: pool-base=7bc1d752daee0f0efab73988f7e61c1a7a4d0a7b local-tip=189d7c4570dd916bf6483b9148e0d54c690eda8d head=189d7c4570dd916bf6483b9148e0d54c690eda8d
+ok - a stale pooled worktree with no origin remote resets to the local default-branch tip
+# observed no-remote dirty refusal: error: pooled worktree '/var/folders/4r/n8883qfn7r153tx77nv2fsbm0000gn/T//fm-spawn-pool-base-freshen.pXx3gI/no-remote-dirty/pool' is not clean; refusing to discard uncommitted work while refreshing its base; preserved=keep this local work
+ok - a dirty pooled worktree with no origin remote is refused without discarding its local work
+# observed unresolvable no-remote default refusal: error: worktree '/var/folders/4r/n8883qfn7r153tx77nv2fsbm0000gn/T//fm-spawn-pool-base-freshen.pXx3gI/no-remote-develop/pool' has no origin remote and no local default branch this spawn can resolve; without an origin only 'main' or 'master' is recognised, so rename the project's default branch to one of those or configure an origin remote
+ok - a no-remote project on an unrecognised default branch is refused with an actionable reason
+# all fm-spawn-pool-base-freshen tests passed

@@ -1,0 +1,20 @@
+Manual end-to-end check - the guard is NOT weakened: with bin/fm-spawn.sh @ d56d3a8
+(the fixed script), a project that HAS an origin which cannot be reached is still
+refused with the original message.
+
+$ git -C withremote remote -v        # an origin IS configured, but it is gone
+origin	file:///tmp/fm-unreachable-manual.CZdlFx/deleted-upstream.git (fetch)
+origin	file:///tmp/fm-unreachable-manual.CZdlFx/deleted-upstream.git (push)
+
+$ fm-spawn.sh fix-unreachable-c3 projects/withremote --mode no-mistakes --yolo off
+warning: /tmp/fm-unreachable-manual.CZdlFx/home/data/fix-unreachable-c3/brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+fatal: '/tmp/fm-unreachable-manual.CZdlFx/deleted-upstream.git' does not appear to be a git repository
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+error: could not fetch origin for pooled worktree '/tmp/fm-unreachable-manual.CZdlFx/pool'; refusing to launch from a potentially stale base
+exit status: 1
+
+$ git -C <worker worktree> status --short --branch   # untouched, no partial state
+## HEAD (no branch)
