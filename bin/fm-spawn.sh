@@ -137,7 +137,16 @@
 #   Before a fresh ship or scout worker starts, its clean task worktree fetches
 #   origin, resolves the current remote default branch, and resets to its tip.
 #   An unreachable origin, unresolved default branch, or non-clean worktree
-#   refuses the spawn rather than risking a PR based on stale history.
+#   refuses the spawn rather than risking a PR based on stale history. A project
+#   with NO origin remote configured (a `local-only` posture may have none) has
+#   no upstream to fetch, so it reports a skip and resets to the tip of its LOCAL
+#   default branch instead of refusing. Without origin/HEAD only `main` and
+#   `master` are recognised as that local default, so a no-remote project on any
+#   other default branch is refused here on purpose - it could not land through
+#   fm-merge-local.sh or be torn down either, and a clean refusal at spawn beats
+#   work that cannot be delivered. The clean-worktree refusal runs first on both
+#   paths, so neither ever discards uncommitted work; an unresolvable local
+#   default branch or an unverified reset still refuses.
 # Batch dispatch: pass one or more `id=repo` pairs instead of a single <id> <project>, e.g.
 #     fm-spawn.sh fix-a-k3=projects/foo add-b-q7=projects/bar [--scout]
 #   Each pair re-execs this script in single-task mode, so the single path stays the only
@@ -1727,8 +1736,66 @@ validate_spawn_worktree() {  # <source> <inspect-target>
   fi
 }
 
+# Refresh a worktree that has no upstream to follow, by resetting it to the tip
+# of the LOCAL default branch. A repository with no origin remote still has a
+# base that can go stale: a sibling local task merging through fm-merge-local.sh
+# advances refs/heads/<default> while a pooled worktree stays detached at the
+# commit it was allocated at. Resetting here is what makes the reported base
+# true, and it is safe only because the caller has already refused a worktree
+# holding uncommitted work.
+# With no origin/HEAD to read, default_branch recognises only `main` and
+# `master`, so a no-remote project on any other default branch is refused rather
+# than launched. Do not widen that list here alone: bin/fm-merge-local.sh and
+# bin/fm-teardown.sh each carry their own copy of the same resolver, so such a
+# project would start work it then could not land or clean up. Widening it means
+# widening all three together.
+freshen_spawn_worktree_local_base() {  # <worktree>
+  local worktree=$1 default expected actual
+  default=$(default_branch "$worktree") || {
+    echo "error: worktree '$worktree' has no origin remote and no local default branch this spawn can resolve; without an origin only 'main' or 'master' is recognised, so rename the project's default branch to one of those or configure an origin remote" >&2
+    return 1
+  }
+  expected=$(git -C "$worktree" rev-parse --verify --quiet "refs/heads/$default^{commit}" 2>/dev/null) || {
+    echo "error: local default branch '$default' is not a commit for pooled worktree '$worktree'; refusing to launch from a potentially stale base" >&2
+    return 1
+  }
+  if ! git -C "$worktree" reset --hard "$expected" >/dev/null; then
+    echo "error: could not reset pooled worktree '$worktree' to local '$default'; refusing to launch from a potentially stale base" >&2
+    return 1
+  fi
+  actual=$(git -C "$worktree" rev-parse --verify --quiet HEAD 2>/dev/null || true)
+  if [ "$actual" != "$expected" ]; then
+    echo "error: pooled worktree '$worktree' is at '${actual:-unknown}', not current local '$default' ('$expected'); refusing to launch" >&2
+    return 1
+  fi
+  echo "skipped: no origin remote for worktree '$worktree'; launched from its local default-branch base '$default' ($expected)"
+}
+
 freshen_spawn_worktree_base() {  # <worktree>
   local worktree=$1 default target expected actual status
+  # The clean-worktree guard owns every exit from this function, upstream-backed
+  # or not, so it runs before any base is chosen: no path below may discard
+  # uncommitted work, and no path below may skip the refusal that protects it.
+  status=$(git -C "$worktree" status --porcelain) || {
+    echo "error: could not inspect pooled worktree '$worktree' before refreshing its base" >&2
+    return 1
+  }
+  if [ -n "$status" ]; then
+    echo "error: pooled worktree '$worktree' is not clean; refusing to discard uncommitted work while refreshing its base" >&2
+    return 1
+  fi
+  # A repository with no origin remote has no upstream that could have advanced,
+  # so its LOCAL default branch is the base to follow rather than a fetched one.
+  # `local-only` projects are documented as possibly having no remote at all
+  # (bin/fm-project-mode.sh), so refusing here would make that whole posture
+  # undispatchable. The test is the CONFIGURED remote, not the fetch result:
+  # when an origin exists but cannot be reached (offline, auth, deleted
+  # upstream) the stale-base risk is real and the fetch below still refuses.
+  # Mirrors ff_target's "skipped: no origin remote" (bin/fm-ff-lib.sh).
+  if ! git -C "$worktree" remote get-url origin >/dev/null 2>&1; then
+    freshen_spawn_worktree_local_base "$worktree"
+    return
+  fi
   if ! git -C "$worktree" fetch --quiet origin; then
     echo "error: could not fetch origin for pooled worktree '$worktree'; refusing to launch from a potentially stale base" >&2
     return 1
@@ -1750,14 +1817,6 @@ freshen_spawn_worktree_base() {  # <worktree>
     echo "error: '$target' is not a commit for pooled worktree '$worktree'; refusing to launch from a potentially stale base" >&2
     return 1
   }
-  status=$(git -C "$worktree" status --porcelain) || {
-    echo "error: could not inspect pooled worktree '$worktree' before refreshing its base" >&2
-    return 1
-  }
-  if [ -n "$status" ]; then
-    echo "error: pooled worktree '$worktree' is not clean; refusing to discard uncommitted work while refreshing its base" >&2
-    return 1
-  fi
   if ! git -C "$worktree" reset --hard "$target" >/dev/null; then
     echo "error: could not reset pooled worktree '$worktree' to '$target'; refusing to launch from a potentially stale base" >&2
     return 1

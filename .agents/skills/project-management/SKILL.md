@@ -69,6 +69,8 @@ After remote creation succeeds, clone it locally, add the registry entry, and in
 
 For a purely `local-only` project, create a local Git repository under its unused `projects/<name>` path, add the registry entry, and make no GitHub call.
 The captain's request to create that local project authorizes this local initialization, but it does not authorize an unmentioned remote repository.
+A project with no remote must currently use `main` or `master` as its default branch, because that is the only default-branch name the fleet can resolve without an `origin`.
+Until that limitation is lifted, a `local-only` project created on any other default branch can be registered but never spawned, landed, or torn down, so create the local repository on one of those two names.
 
 ## Initialize
 
